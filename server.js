@@ -414,6 +414,45 @@ app.get('/api/relatorios/turma/:turma_id', async (req, res) => {
   res.json({ alunos: statsPorAluno, atividades: statsPorAtividade });
 });
 
+// ── N8N — GERAR QUESTÕES COM IA ───────────────────────────────────────────────
+
+app.post('/api/gerar-questoes', async (req, res) => {
+  const { texto, numQuestoes, tema, modulo_id, atividade_id, professor_id } = req.body;
+  
+  if (!texto || !modulo_id) return res.status(400).json({ erro: 'Dados incompletos' });
+
+  try {
+    const response = await fetch('https://muriloterra19.app.n8n.cloud/webhook-test/gerar-questoes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texto, numQuestoes: numQuestoes || 5, tema, modulo_id, atividade_id, professor_id })
+    });
+
+    const data = await response.json();
+
+    if (!data.sucesso) return res.status(500).json({ erro: data.erro || 'Erro ao gerar questões' });
+
+    // Salva as questões no Supabase como pendentes (resposta_correta = -1 indica pendente de curadoria)
+    const questoesSalvas = [];
+    for (const q of data.questoes) {
+      const { data: questao } = await sb(`/questoes`, {
+        method: 'POST',
+        body: JSON.stringify({
+          atividade_id,
+          enunciado: q.enunciado,
+          alternativas: JSON.stringify(q.alternativas),
+          resposta_correta: q.resposta_correta,
+          status: 'pendente'
+        }),
+      });
+      questoesSalvas.push(Array.isArray(questao) ? questao[0] : questao);
+    }
+
+    res.json({ sucesso: true, questoes: questoesSalvas, total: questoesSalvas.length });
+  } catch (error) {
+    res.status(500).json({ erro: 'Erro ao conectar com o gerador de IA: ' + error.message });
+  }
+});
 // ── START ─────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
