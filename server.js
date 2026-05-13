@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 const SUPABASE_URL = 'https://qwggvbiirxcjucuurwfw.supabase.co/rest/v1';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3Z2d2YmlpcnhjanVjdXVyd2Z3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjczNDksImV4cCI6MjA5NDIwMzM0OX0.0N4xpnPcBFSrDN4kzb8uag_Sdvr8D-WcGxpnauQtHMo';
@@ -10,7 +10,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 app.use(cors());
 app.use(express.json());
 
-// ─── Helper para chamar Supabase REST API ─────────────────────────────────────
+// ─── Helper Supabase ──────────────────────────────────────────────────────────
 async function sb(path, options = {}) {
   const res = await fetch(`${SUPABASE_URL}${path}`, {
     ...options,
@@ -25,6 +25,12 @@ async function sb(path, options = {}) {
   const text = await res.text();
   try { return { data: JSON.parse(text), status: res.status }; }
   catch { return { data: text, status: res.status }; }
+}
+
+// ─── Gera senha padrão ────────────────────────────────────────────────────────
+function senhaPadrao(ra) {
+  const ano = new Date().getFullYear();
+  return `${ra}${ano}*`;
 }
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
@@ -63,15 +69,36 @@ app.get('/api/profiles/:id', async (req, res) => {
   res.json(data[0]);
 });
 
-app.post('/api/profiles', async (req, res) => {
-  const { nome, email, ra, senha, role, instituicao_id } = req.body;
-  if (!nome || !email || !ra || !senha) return res.status(400).json({ erro: 'Dados incompletos' });
+// Admin cria professor
+app.post('/api/profiles/professor', async (req, res) => {
+  const { nome, email, ra, instituicao_id } = req.body;
+  if (!nome || !email || !ra) return res.status(400).json({ erro: 'Dados incompletos' });
+  const senha = senhaPadrao(ra);
   const { data, status } = await sb('/profiles', {
     method: 'POST',
-    body: JSON.stringify({ nome, email, ra, senha, role: role || 'aluno', instituicao_id: instituicao_id || 1, primeiro_acesso: 1 }),
+    body: JSON.stringify({ nome, email, ra, senha, role: 'professor', instituicao_id: instituicao_id || 1, primeiro_acesso: 1 }),
   });
   if (status >= 400) return res.status(400).json({ erro: 'RA ou email já cadastrado' });
-  res.status(201).json(Array.isArray(data) ? data[0] : data);
+  res.status(201).json({ ...(Array.isArray(data) ? data[0] : data), senha_padrao: senha });
+});
+
+// Professor cria aluno
+app.post('/api/profiles/aluno', async (req, res) => {
+  const { nome, email, ra, turma_id, instituicao_id } = req.body;
+  if (!nome || !email || !ra || !turma_id) return res.status(400).json({ erro: 'Dados incompletos' });
+  const senha = senhaPadrao(ra);
+  const { data, status } = await sb('/profiles', {
+    method: 'POST',
+    body: JSON.stringify({ nome, email, ra, senha, role: 'aluno', instituicao_id: instituicao_id || 1, primeiro_acesso: 1 }),
+  });
+  if (status >= 400) return res.status(400).json({ erro: 'RA ou email já cadastrado' });
+  const aluno = Array.isArray(data) ? data[0] : data;
+  // Matricula automaticamente na turma
+  await sb('/matriculas', {
+    method: 'POST',
+    body: JSON.stringify({ aluno_id: aluno.id, turma_id, ativo: 1 }),
+  });
+  res.status(201).json({ ...aluno, senha_padrao: senha });
 });
 
 // ── TURMAS ────────────────────────────────────────────────────────────────────
@@ -84,13 +111,21 @@ app.get('/api/turmas', async (req, res) => {
 });
 
 app.post('/api/turmas', async (req, res) => {
-  const { nome, professor_id, instituicao_id } = req.body;
+  const { nome, professor_id, instituicao_id, semestre_id } = req.body;
   if (!nome || !professor_id) return res.status(400).json({ erro: 'Dados incompletos' });
   const { data } = await sb('/turmas', {
     method: 'POST',
     body: JSON.stringify({ nome, professor_id, instituicao_id: instituicao_id || 1 }),
   });
-  res.status(201).json(Array.isArray(data) ? data[0] : data);
+  const turma = Array.isArray(data) ? data[0] : data;
+  // Vincula ao semestre se informado
+  if (semestre_id) {
+    await sb('/turma_semestre', {
+      method: 'POST',
+      body: JSON.stringify({ turma_id: turma.id, semestre_id, horas_disponiveis: 5, horas_utilizadas: 0 }),
+    });
+  }
+  res.status(201).json(turma);
 });
 
 // ── MATRÍCULAS ────────────────────────────────────────────────────────────────
@@ -98,8 +133,8 @@ app.post('/api/turmas', async (req, res) => {
 app.get('/api/matriculas', async (req, res) => {
   const { turma_id, aluno_id } = req.query;
   if (turma_id) {
-    const { data } = await sb(`/matriculas?turma_id=eq.${turma_id}&select=*,profiles!aluno_id(nome,email,ra)`);
-    const mapped = (data || []).map(m => ({ ...m, nome: m.profiles?.nome, email: m.profiles?.email, ra: m.profiles?.ra }));
+    const { data } = await sb(`/matriculas?turma_id=eq.${turma_id}&select=*,profiles!aluno_id(id,nome,email,ra,primeiro_acesso)`);
+    const mapped = (data || []).map(m => ({ ...m, nome: m.profiles?.nome, email: m.profiles?.email, ra: m.profiles?.ra, primeiro_acesso: m.profiles?.primeiro_acesso }));
     return res.json(mapped);
   }
   if (aluno_id) {
@@ -163,11 +198,29 @@ app.get('/api/atividades', async (req, res) => {
 });
 
 app.post('/api/atividades', async (req, res) => {
-  const { modulo_id, professor_id, titulo, descricao, tipo_horas, data_inicio, data_fim, duracao } = req.body;
+  const { modulo_id, professor_id, titulo, descricao, tipo_horas, data_inicio, data_fim, duracao, horas, nota_minima_horas, gera_horas } = req.body;
   if (!modulo_id || !titulo) return res.status(400).json({ erro: 'Dados incompletos' });
+
+  // Verifica saldo de horas da turma no semestre
+  if (gera_horas && horas > 0) {
+    const { data: modData } = await sb(`/modulos?id=eq.${modulo_id}&select=turma_id`);
+    if (modData && modData[0]) {
+      const { data: tsData } = await sb(`/turma_semestre?turma_id=eq.${modData[0].turma_id}&select=*`);
+      if (tsData && tsData[0]) {
+        const saldo = tsData[0].horas_disponiveis - tsData[0].horas_utilizadas;
+        if (horas > saldo) return res.status(400).json({ erro: `Saldo insuficiente. Disponível: ${saldo}h` });
+        // Atualiza horas utilizadas
+        await sb(`/turma_semestre?id=eq.${tsData[0].id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ horas_utilizadas: tsData[0].horas_utilizadas + horas }),
+        });
+      }
+    }
+  }
+
   const { data } = await sb('/atividades', {
     method: 'POST',
-    body: JSON.stringify({ modulo_id, professor_id, titulo, descricao, tipo_horas: tipo_horas || 'academica', data_inicio, data_fim, duracao: duracao || 300 }),
+    body: JSON.stringify({ modulo_id, professor_id, titulo, descricao, tipo_horas: tipo_horas || 'academica', data_inicio, data_fim, duracao: duracao || 300, horas: horas || 0, nota_minima_horas: nota_minima_horas || 6, gera_horas: gera_horas || 0 }),
   });
   res.status(201).json(Array.isArray(data) ? data[0] : data);
 });
@@ -211,19 +264,23 @@ app.post('/api/tentativas', async (req, res) => {
     body: JSON.stringify({ aluno_id, atividade_id, respostas: JSON.stringify(respostas), nota }),
   });
 
-  // Verifica se deve emitir certificado
-  const { data: ativData } = await sb(`/atividades?id=eq.${atividade_id}&select=modulo_id`);
+  // Verifica certificado
+  const { data: ativData } = await sb(`/atividades?id=eq.${atividade_id}&select=*`);
   let certificado = null;
   if (ativData && ativData[0]) {
-    const { data: modData } = await sb(`/modulos?id=eq.${ativData[0].modulo_id}&select=nota_minima,id`);
-    if (modData && modData[0] && nota >= modData[0].nota_minima) {
-      const { data: certData } = await sb('/certificados', {
-        method: 'POST',
-        body: JSON.stringify({ aluno_id, modulo_id: modData[0].id }),
-        prefer: 'return=representation',
-        headers: { 'Prefer': 'return=representation,resolution=ignore-duplicates' },
-      });
-      certificado = Array.isArray(certData) ? certData[0] : certData;
+    const ativ = ativData[0];
+    const notaMinima = ativ.gera_horas ? ativ.nota_minima_horas : 6;
+    if (nota >= notaMinima) {
+      const { data: modData } = await sb(`/modulos?id=eq.${ativ.modulo_id}&select=*`);
+      if (modData && modData[0]) {
+        await sb('/certificados', {
+          method: 'POST',
+          body: JSON.stringify({ aluno_id, modulo_id: modData[0].id }),
+          headers: { 'Prefer': 'return=representation,resolution=ignore-duplicates' },
+        });
+        const { data: certData } = await sb(`/certificados?aluno_id=eq.${aluno_id}&modulo_id=eq.${modData[0].id}&select=*`);
+        certificado = certData && certData[0] ? { ...certData[0], horas: ativ.horas, modulo_titulo: modData[0].titulo } : null;
+      }
     }
   }
 
@@ -238,9 +295,37 @@ app.post('/api/tentativas', async (req, res) => {
 app.get('/api/certificados', async (req, res) => {
   const { aluno_id } = req.query;
   if (!aluno_id) return res.status(400).json({ erro: 'aluno_id obrigatório' });
-  const { data } = await sb(`/certificados?aluno_id=eq.${aluno_id}&select=*,modulos!modulo_id(titulo)`);
-  const mapped = (data || []).map(c => ({ ...c, modulo_titulo: c.modulos?.titulo }));
+  const { data } = await sb(`/certificados?aluno_id=eq.${aluno_id}&select=*,modulos!modulo_id(titulo,horas_maximas)`);
+  const mapped = (data || []).map(c => ({ ...c, modulo_titulo: c.modulos?.titulo, horas: c.modulos?.horas_maximas }));
   res.json(mapped);
+});
+
+// ── SEMESTRES ─────────────────────────────────────────────────────────────────
+
+app.get('/api/semestres', async (req, res) => {
+  const { data } = await sb('/semestres?select=*&order=id.desc');
+  res.json(data || []);
+});
+
+app.post('/api/semestres', async (req, res) => {
+  const { nome, data_inicio, data_fim } = req.body;
+  if (!nome || !data_inicio || !data_fim) return res.status(400).json({ erro: 'Dados incompletos' });
+  // Desativa semestres anteriores
+  await sb('/semestres?ativo=eq.1', { method: 'PATCH', body: JSON.stringify({ ativo: 0 }) });
+  const { data } = await sb('/semestres', {
+    method: 'POST',
+    body: JSON.stringify({ nome, data_inicio, data_fim, ativo: 1 }),
+  });
+  res.status(201).json(Array.isArray(data) ? data[0] : data);
+});
+
+// ── TURMA SEMESTRE (saldo de horas) ──────────────────────────────────────────
+
+app.get('/api/turma-semestre', async (req, res) => {
+  const { turma_id } = req.query;
+  if (!turma_id) return res.status(400).json({ erro: 'turma_id obrigatório' });
+  const { data } = await sb(`/turma_semestre?turma_id=eq.${turma_id}&select=*,semestres!semestre_id(nome,ativo)`);
+  res.json(data || []);
 });
 
 // ── STATS ─────────────────────────────────────────────────────────────────────
