@@ -365,6 +365,55 @@ app.get('/api/stats', async (req, res) => {
   });
 });
 
+// ── RELATÓRIOS ────────────────────────────────────────────────────────────────
+
+app.get('/api/relatorios/turma/:turma_id', async (req, res) => {
+  const { turma_id } = req.params;
+
+  // Alunos da turma
+  const { data: mats } = await sb(`/matriculas?turma_id=eq.${turma_id}&select=*,profiles!aluno_id(id,nome,ra)`);
+  const alunos = (mats || []).map(m => ({ id: m.profiles?.id, nome: m.profiles?.nome, ra: m.profiles?.ra }));
+
+  // Módulos e atividades da turma
+  const { data: modulos } = await sb(`/modulos?turma_id=eq.${turma_id}&select=*`);
+  const modIds = (modulos || []).map(m => m.id);
+  let atividades = [];
+  if (modIds.length > 0) {
+    const { data: ativs } = await sb(`/atividades?modulo_id=in.(${modIds.join(',')})&select=*`);
+    atividades = ativs || [];
+  }
+
+  // Tentativas de todos os alunos da turma
+  const alunoIds = alunos.map(a => a.id);
+  let tentativas = [];
+  if (alunoIds.length > 0) {
+    const { data: tents } = await sb(`/tentativas?aluno_id=in.(${alunoIds.join(',')})&select=*`);
+    tentativas = tents || [];
+  }
+
+  // Stats por aluno
+  const statsPorAluno = alunos.map(aluno => {
+    const tentsAluno = tentativas.filter(t => t.aluno_id === aluno.id);
+    const notas = tentsAluno.map(t => t.nota);
+    const media = notas.length ? (notas.reduce((a, b) => a + b, 0) / notas.length).toFixed(1) : null;
+    const aprovadas = tentsAluno.filter(t => t.nota >= 6).length;
+    const horas = aprovadas * 2;
+    return { ...aluno, totalAtividades: tentsAluno.length, media, aprovadas, horas };
+  });
+
+  // Stats por atividade
+  const statsPorAtividade = atividades.map(ativ => {
+    const tentsAtiv = tentativas.filter(t => t.atividade_id === ativ.id);
+    const notas = tentsAtiv.map(t => t.nota);
+    const media = notas.length ? (notas.reduce((a, b) => a + b, 0) / notas.length).toFixed(1) : null;
+    const aprovados = tentsAtiv.filter(t => t.nota >= 6).length;
+    const taxa = tentsAtiv.length ? Math.round((aprovados / tentsAtiv.length) * 100) : 0;
+    return { ...ativ, totalRespostas: tentsAtiv.length, media, aprovados, taxa };
+  });
+
+  res.json({ alunos: statsPorAluno, atividades: statsPorAtividade });
+});
+
 // ── START ─────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
