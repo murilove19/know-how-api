@@ -2,10 +2,11 @@
   "name": "know-how-api",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "check": "find src -type f -name \"*.js\" -print | sort | xargs -I{} node --check {} && node --check server.js",
+    "test": "npm run check"
   },
   "keywords": [],
   "author": "",
