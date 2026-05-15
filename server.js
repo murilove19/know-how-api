@@ -421,6 +421,251 @@ app.get('/api/relatorios/turma/:turma_id', async (req, res) => {
   res.json({ alunos: statsPorAluno, atividades: statsPorAtividade, tentativas });
 });
 
+// ── SUPER ADMIN — STATS COMPLETO ─────────────────────────────────────────────
+
+app.get('/api/stats-superadmin', async (req, res) => {
+  const [alunos, professores, admins, turmas, atividades, certs] = await Promise.all([
+    sb('/profiles?role=eq.aluno&select=id'),
+    sb('/profiles?role=eq.professor&select=id'),
+    sb('/profiles?role=eq.admin&is_super_admin=eq.0&select=id'),
+    sb('/turmas?select=id'),
+    sb('/atividades?select=id'),
+    sb('/certificados?select=horas'),
+  ]);
+  const horas = (certs.data || []).reduce((s, c) => s + (parseFloat(c.horas) || 0), 0);
+  res.json({
+    alunos: alunos.data?.length || 0,
+    professores: professores.data?.length || 0,
+    admins: admins.data?.length || 0,
+    turmas: turmas.data?.length || 0,
+    atividades: atividades.data?.length || 0,
+    horas: horas.toFixed(1),
+  });
+});
+
+// ── SUPER ADMIN — DETALHE POR TIPO ───────────────────────────────────────────
+
+app.get('/api/superadmin/detalhe/:tipo', async (req, res) => {
+  const { tipo } = req.params;
+
+  if (tipo === 'admins') {
+    const { data: admins } = await sb('/profiles?role=eq.admin&is_super_admin=eq.0&select=*');
+    const { data: cursos } = await sb('/cursos?select=*');
+    const result = (admins || []).map(a => ({
+      nome: a.nome, email: a.email,
+      curso: (cursos || []).find(c => c.id === a.curso_id)?.nome || null
+    }));
+    return res.json(result);
+  }
+
+  if (tipo === 'professores') {
+    const { data: profs } = await sb('/profiles?role=eq.professor&select=*');
+    const { data: cursos } = await sb('/cursos?select=*');
+    const { data: turmas } = await sb('/turmas?select=*');
+    const result = await Promise.all((profs || []).map(async p => {
+      const turmasProf = (turmas || []).filter(t => t.professor_id === p.id).map(t => t.nome);
+      return { nome: p.nome, curso: (cursos || []).find(c => c.id === p.curso_id)?.nome || null, turmas: turmasProf };
+    }));
+    return res.json(result);
+  }
+
+  if (tipo === 'alunos') {
+    const { data: alunos } = await sb('/profiles?role=eq.aluno&select=*');
+    const { data: mats } = await sb('/matriculas?select=*');
+    const { data: modulos } = await sb('/modulos?select=*');
+    const result = (alunos || []).map(a => {
+      const turmaIds = (mats || []).filter(m => m.aluno_id === a.id).map(m => m.turma_id);
+      const modsAluno = (modulos || []).filter(m => turmaIds.includes(m.turma_id)).map(m => m.titulo);
+      return { nome: a.nome, ra: a.ra, modulos: modsAluno };
+    });
+    return res.json(result);
+  }
+
+  if (tipo === 'turmas') {
+    const { data: turmas } = await sb('/turmas?select=*');
+    const { data: profs } = await sb('/profiles?role=eq.professor&select=id,nome');
+    const { data: mats } = await sb('/matriculas?select=turma_id');
+    const result = (turmas || []).map(t => ({
+      nome: t.nome,
+      professor: (profs || []).find(p => p.id === t.professor_id)?.nome || '—',
+      alunos: (mats || []).filter(m => m.turma_id === t.id).length
+    }));
+    return res.json(result);
+  }
+
+  if (tipo === 'atividades') {
+    const { data: ativs } = await sb('/atividades?select=*');
+    const { data: mods } = await sb('/modulos?select=*');
+    const { data: profs } = await sb('/profiles?role=eq.professor&select=id,nome');
+    const result = (ativs || []).map(a => {
+      const mod = (mods || []).find(m => m.id === a.modulo_id);
+      return {
+        titulo: a.titulo,
+        modulo: mod?.titulo || '—',
+        professor: (profs || []).find(p => p.id === mod?.professor_id)?.nome || '—'
+      };
+    });
+    return res.json(result);
+  }
+
+  if (tipo === 'horas') {
+    const { data: certs } = await sb('/certificados?select=*');
+    const { data: alunos } = await sb('/profiles?role=eq.aluno&select=id,nome,ra');
+    const { data: mats } = await sb('/matriculas?select=*');
+    const { data: turmas } = await sb('/turmas?select=id,nome');
+    const result = (alunos || []).map(a => {
+      const horas = (certs || []).filter(c => c.aluno_id === a.id).reduce((s, c) => s + (parseFloat(c.horas) || 0), 0);
+      const turmaId = (mats || []).find(m => m.aluno_id === a.id)?.turma_id;
+      const turma = (turmas || []).find(t => t.id === turmaId)?.nome || '—';
+      return { nome: a.nome, ra: a.ra, turma, horas: horas.toFixed(1) };
+    }).filter(a => parseFloat(a.horas) > 0).sort((a, b) => parseFloat(b.horas) - parseFloat(a.horas));
+    return res.json(result);
+  }
+
+  res.json([]);
+});
+
+// ── SUPER ADMIN — LOGS ────────────────────────────────────────────────────────
+
+app.get('/api/superadmin/logs', async (req, res) => {
+  const [profs, alunos, tentativas, certs] = await Promise.all([
+    sb('/profiles?role=eq.professor&select=nome,created_at&order=created_at.desc&limit=5'),
+    sb('/profiles?role=eq.aluno&select=nome,created_at&order=created_at.desc&limit=5'),
+    sb('/tentativas?select=aluno_id,nota,created_at&order=created_at.desc&limit=5'),
+    sb('/certificados?select=aluno_id,horas,emitido_em&order=emitido_em.desc&limit=5'),
+  ]);
+  const { data: alunosMap } = await sb('/profiles?role=eq.aluno&select=id,nome');
+  const getAluno = (id) => (alunosMap || []).find(a => a.id === id)?.nome || 'Aluno';
+
+  const logs = [
+    ...(profs.data || []).map(p => ({ icone: "👨‍🏫", descricao: `Professor ${p.nome} foi cadastrado`, data: p.created_at })),
+    ...(alunos.data || []).map(a => ({ icone: "👤", descricao: `Aluno ${a.nome} foi cadastrado`, data: a.created_at })),
+    ...(tentativas.data || []).map(t => ({ icone: "📝", descricao: `${getAluno(t.aluno_id)} realizou uma atividade com nota ${t.nota}`, data: t.created_at })),
+    ...(certs.data || []).map(c => ({ icone: "🎓", descricao: `${getAluno(c.aluno_id)} recebeu certificado de ${c.horas}h`, data: c.emitido_em })),
+  ].sort((a, b) => new Date(b.data) - new Date(a.data)).slice(0, 20);
+
+  res.json(logs);
+});
+
+// ── SUPER ADMIN — ENGAJAMENTO ─────────────────────────────────────────────────
+
+app.get('/api/superadmin/engajamento', async (req, res) => {
+  const [alunos, tentativas, modulos, atividades, profs] = await Promise.all([
+    sb('/profiles?role=eq.aluno&select=id'),
+    sb('/tentativas?select=aluno_id,atividade_id'),
+    sb('/modulos?select=id,titulo'),
+    sb('/atividades?select=id,modulo_id,professor_id'),
+    sb('/profiles?role=eq.professor&select=id,nome,curso_id'),
+  ]);
+  const { data: cursos } = await sb('/cursos?select=id,nome');
+
+  const totalAlunos = (alunos.data || []).length;
+  const alunosAtivos = new Set((tentativas.data || []).map(t => t.aluno_id)).size;
+
+  // Módulos mais acessados
+  const contagemMods = {};
+  (tentativas.data || []).forEach(t => {
+    const ativ = (atividades.data || []).find(a => a.id === t.atividade_id);
+    if (ativ) contagemMods[ativ.modulo_id] = (contagemMods[ativ.modulo_id] || 0) + 1;
+  });
+  const modulosMaisAcessados = Object.entries(contagemMods)
+    .map(([id, acessos]) => ({ titulo: (modulos.data || []).find(m => m.id === parseInt(id))?.titulo || '—', acessos }))
+    .sort((a, b) => b.acessos - a.acessos).slice(0, 5);
+
+  // Professores mais ativos
+  const contagemProfs = {};
+  (atividades.data || []).forEach(a => {
+    if (a.professor_id) contagemProfs[a.professor_id] = (contagemProfs[a.professor_id] || 0) + 1;
+  });
+  const professoresMaisAtivos = Object.entries(contagemProfs)
+    .map(([id, ativs]) => {
+      const prof = (profs.data || []).find(p => p.id === parseInt(id));
+      const curso = (cursos || []).find(c => c.id === prof?.curso_id)?.nome || '—';
+      return { nome: prof?.nome || '—', curso, atividades: ativs };
+    })
+    .sort((a, b) => b.atividades - a.atividades).slice(0, 3);
+
+  res.json({ totalAlunos, alunosAtivos, modulosMaisAcessados, professoresMaisAtivos });
+});
+
+// ── RELATÓRIO POR CURSO (Admin) ──────────────────────────────────────────────
+
+app.get('/api/relatorios/curso', async (req, res) => {
+  const { curso_id } = req.query;
+
+  // Professores do curso
+  const filter = curso_id ? `?role=eq.professor&curso_id=eq.${curso_id}&select=id` : '?role=eq.professor&select=id';
+  const { data: profs } = await sb(`/profiles${filter}`);
+  const profIds = (profs || []).map(p => p.id);
+
+  if (profIds.length === 0) return res.json({ turmas: [], alunosHoras: [] });
+
+  // Turmas dos professores
+  const { data: turmas } = await sb(`/turmas?professor_id=in.(${profIds.join(',')})&select=*`);
+  const turmasArr = turmas || [];
+  if (turmasArr.length === 0) return res.json({ turmas: [], alunosHoras: [] });
+
+  const turmaIds = turmasArr.map(t => t.id);
+
+  // Alunos de todas as turmas
+  const { data: mats } = await sb(`/matriculas?turma_id=in.(${turmaIds.join(',')})&select=*,profiles!aluno_id(id,nome,ra)`);
+  const matriculas = mats || [];
+
+  // Módulos e atividades
+  const { data: modulos } = await sb(`/modulos?turma_id=in.(${turmaIds.join(',')})&select=*`);
+  const modIds = (modulos || []).map(m => m.id);
+  let atividades = [];
+  if (modIds.length > 0) {
+    const { data: ativs } = await sb(`/atividades?modulo_id=in.(${modIds.join(',')})&select=*`);
+    atividades = ativs || [];
+  }
+
+  // Tentativas de todos
+  const alunoIds = [...new Set(matriculas.map(m => m.profiles?.id).filter(Boolean))];
+  let tentativas = [];
+  if (alunoIds.length > 0) {
+    const { data: tents } = await sb(`/tentativas?aluno_id=in.(${alunoIds.join(',')})&select=*`);
+    tentativas = tents || [];
+  }
+
+  // Certificados de todos
+  let certificados = [];
+  if (alunoIds.length > 0) {
+    const { data: certs } = await sb(`/certificados?aluno_id=in.(${alunoIds.join(',')})&select=*`);
+    certificados = certs || [];
+  }
+
+  // Stats por turma
+  const statsPorTurma = turmasArr.map(turma => {
+    const matsT = matriculas.filter(m => m.turma_id === turma.id);
+    const alunosT = matsT.map(m => m.profiles?.id).filter(Boolean);
+    const tentsT = tentativas.filter(t => alunoIds.includes(t.aluno_id) && alunosT.includes(t.aluno_id));
+    const notas = tentsT.map(t => t.nota);
+    const mediaGeral = notas.length ? (notas.reduce((a, b) => a + b, 0) / notas.length).toFixed(1) : null;
+    const aprovados = [...new Set(tentsT.filter(t => t.nota >= 6).map(t => t.aluno_id))].length;
+    return {
+      id: turma.id,
+      nome: turma.nome,
+      totalAlunos: matsT.length,
+      totalAtividades: tentsT.length,
+      mediaGeral,
+      aprovados,
+    };
+  });
+
+  // Relatório de horas por aluno
+  const alunosHoras = matriculas.map(m => {
+    const aluno = m.profiles;
+    if (!aluno) return null;
+    const turma = turmasArr.find(t => t.id === m.turma_id);
+    const certs = certificados.filter(c => c.aluno_id === aluno.id);
+    const horas = certs.reduce((s, c) => s + (parseFloat(c.horas) || 0), 0);
+    return { id: aluno.id, nome: aluno.nome, ra: aluno.ra, turma: turma?.nome || '—', horas };
+  }).filter(Boolean).filter(a => a.horas > 0);
+
+  res.json({ turmas: statsPorTurma, alunosHoras });
+});
+
 // ── N8N — GERAR QUESTÕES COM IA ───────────────────────────────────────────────
 
 app.post('/api/gerar-questoes', async (req, res) => {
