@@ -226,7 +226,7 @@ app.get('/api/atividades', async (req, res) => {
 });
 
 app.post('/api/atividades', async (req, res) => {
-  const { modulo_id, professor_id, titulo, descricao, tipo_horas, data_inicio, data_fim, duracao, horas, nota_minima_horas, nota_minima, gera_horas } = req.body;
+  const { modulo_id, professor_id, titulo, descricao, tipo_horas, data_inicio, data_fim, duracao, horas, nota_minima_horas, gera_horas } = req.body;
   if (!modulo_id || !titulo) return res.status(400).json({ erro: 'Dados incompletos' });
 
   if (gera_horas && horas > 0) {
@@ -241,8 +241,15 @@ app.post('/api/atividades', async (req, res) => {
     }
   }
 
-  const { data } = await sb('/atividades', { method: 'POST', body: JSON.stringify({ modulo_id, professor_id, titulo, descricao, tipo_horas: tipo_horas || 'academica', data_inicio, data_fim: data_fim || null, duracao: duracao || 300, horas: horas || 0, nota_minima_horas: nota_minima_horas || 6, nota_minima: nota_minima || 6, gera_horas: gera_horas || 0 }) });
+  const { data } = await sb('/atividades', { method: 'POST', body: JSON.stringify({ modulo_id, professor_id, titulo, descricao, tipo_horas: tipo_horas || 'academica', data_inicio, data_fim, duracao: duracao || 300, horas: horas || 0, nota_minima_horas: nota_minima_horas || 6, gera_horas: gera_horas || 0 }) });
   res.status(201).json(Array.isArray(data) ? data[0] : data);
+});
+
+// ── ATIVIDADE POR ID ─────────────────────────────────────────────────────────
+
+app.get('/api/atividades-by-id/:id', async (req, res) => {
+  const { data } = await sb(`/atividades?id=eq.${req.params.id}&select=*`);
+  res.json(data && data[0] ? data[0] : null);
 });
 
 // ── QUESTÕES ──────────────────────────────────────────────────────────────────
@@ -411,7 +418,7 @@ app.get('/api/relatorios/turma/:turma_id', async (req, res) => {
     return { ...ativ, totalRespostas: tentsAtiv.length, media, aprovados, taxa };
   });
 
-  res.json({ alunos: statsPorAluno, atividades: statsPorAtividade });
+  res.json({ alunos: statsPorAluno, atividades: statsPorAtividade, tentativas });
 });
 
 // ── N8N — GERAR QUESTÕES COM IA ───────────────────────────────────────────────
