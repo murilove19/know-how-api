@@ -427,7 +427,7 @@ app.get('/api/stats-superadmin', async (req, res) => {
   const [alunos, professores, admins, turmas, atividades, certs] = await Promise.all([
     sb('/profiles?role=eq.aluno&select=id'),
     sb('/profiles?role=eq.professor&select=id'),
-    sb('/profiles?role=eq.admin&is_super_admin=eq.0&select=id'),
+    sb('/profiles?role=eq.admin&select=id'),
     sb('/turmas?select=id'),
     sb('/atividades?select=id'),
     sb('/certificados?select=horas'),
