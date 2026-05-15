@@ -432,7 +432,7 @@ app.get('/api/stats-superadmin', async (req, res) => {
     sb('/atividades?select=id'),
     sb('/certificados?select=horas'),
   ]);
-  const horas = (certs.data || []).reduce((s, c) => s + (parseFloat(c.horas) || 0), 0);
+  const horas = Array.isArray(certs.data) ? certs.data.reduce((s, c) => s + (parseFloat(c.horas) || 0), 0) : 0;
   res.json({
     alunos: alunos.data?.length || 0,
     professores: professores.data?.length || 0,
