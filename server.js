@@ -422,7 +422,7 @@ app.post('/api/gerar-questoes', async (req, res) => {
   if (!texto || !modulo_id) return res.status(400).json({ erro: 'Dados incompletos' });
 
   try {
-    const response = await fetch('https://muriloterra19.app.n8n.cloud/webhook-test/gerar-questoes', {
+    const response = await fetch('https://muriloterra19.app.n8n.cloud/webhook/gerar-questoes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ texto, numQuestoes: numQuestoes || 5, tema, modulo_id, atividade_id, professor_id })
