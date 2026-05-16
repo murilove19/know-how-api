@@ -287,6 +287,31 @@ app.get('/api/atividades-by-id/:id', async (req, res) => {
   res.json(data && data[0] ? data[0] : null);
 });
 
+// ── EXCLUIR PROFILE ──────────────────────────────────────────────────────────
+
+app.post('/api/profiles/excluir', async (req, res) => {
+  const { id, role } = req.body;
+  if (!id) return res.status(400).json({ erro: 'ID obrigatório' });
+  // Remove matrículas/turmas relacionadas antes
+  if (role === 'professor') {
+    const { data: turmas } = await sb(`/turmas?professor_id=eq.${id}&select=id`);
+    for (const t of turmas || []) {
+      await sb(`/matriculas?turma_id=eq.${t.id}`, { method: 'DELETE' });
+      await sb(`/turma_semestre?turma_id=eq.${t.id}`, { method: 'DELETE' });
+    }
+    await sb(`/turmas?professor_id=eq.${id}`, { method: 'DELETE' });
+    await sb(`/professor_semestre_horas?professor_id=eq.${id}`, { method: 'DELETE' });
+  }
+  if (role === 'aluno') {
+    await sb(`/matriculas?aluno_id=eq.${id}`, { method: 'DELETE' });
+    await sb(`/tentativas?aluno_id=eq.${id}`, { method: 'DELETE' });
+    await sb(`/certificados?aluno_id=eq.${id}`, { method: 'DELETE' });
+  }
+  const { status } = await sb(`/profiles?id=eq.${id}`, { method: 'DELETE' });
+  if (status >= 400) return res.status(400).json({ erro: 'Erro ao excluir' });
+  res.json({ ok: true });
+});
+
 // ── QUESTÕES ──────────────────────────────────────────────────────────────────
 
 app.get('/api/questoes', async (req, res) => {
