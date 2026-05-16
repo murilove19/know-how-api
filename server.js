@@ -108,6 +108,23 @@ app.post('/api/profiles/professor', async (req, res) => {
 app.post('/api/profiles/aluno', async (req, res) => {
   const { nome, email, ra, turma_id, instituicao_id } = req.body;
   if (!nome || !email || !ra || !turma_id) return res.status(400).json({ erro: 'Dados incompletos' });
+
+  // Verifica se aluno já existe pelo RA
+  const { data: existente } = await sb(`/profiles?ra=eq.${encodeURIComponent(ra)}&select=*`);
+
+  if (existente && existente.length > 0) {
+    const aluno = existente[0];
+    // Verifica se já está matriculado nessa turma
+    const { data: matExiste } = await sb(`/matriculas?aluno_id=eq.${aluno.id}&turma_id=eq.${turma_id}&select=id`);
+    if (matExiste && matExiste.length > 0) {
+      return res.status(200).json({ ...aluno, status: 'ja_matriculado' });
+    }
+    // Só matricula na nova turma, mantém senha e perfil intactos
+    await sb('/matriculas', { method: 'POST', body: JSON.stringify({ aluno_id: aluno.id, turma_id, ativo: 1 }) });
+    return res.status(200).json({ ...aluno, status: 'matriculado_turma_nova' });
+  }
+
+  // Aluno não existe — cria perfil + matricula
   const senha = senhaPadrao(ra);
   const { data, status } = await sb('/profiles', {
     method: 'POST',
@@ -116,7 +133,7 @@ app.post('/api/profiles/aluno', async (req, res) => {
   if (status >= 400) return res.status(400).json({ erro: 'RA ou email já cadastrado' });
   const aluno = Array.isArray(data) ? data[0] : data;
   await sb('/matriculas', { method: 'POST', body: JSON.stringify({ aluno_id: aluno.id, turma_id, ativo: 1 }) });
-  res.status(201).json({ ...aluno, senha_padrao: senha });
+  res.status(201).json({ ...aluno, senha_padrao: senha, status: 'criado' });
 });
 
 // ── CURSOS ────────────────────────────────────────────────────────────────────
