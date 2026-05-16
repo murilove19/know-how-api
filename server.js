@@ -103,7 +103,7 @@ app.post('/api/profiles/admin', async (req, res) => {
 
 // Admin de curso cria Professor
 app.post('/api/profiles/professor', async (req, res) => {
-  const { nome, email, ra, curso_id, instituicao_id } = req.body;
+  const { nome, email, ra, curso_id, instituicao_id, semestre_id, horas_disponiveis } = req.body;
   if (!nome || !email || !ra) return res.status(400).json({ erro: 'Dados incompletos' });
   const senha = senhaPadrao(ra);
   const { data, status } = await sb('/profiles', {
@@ -111,7 +111,15 @@ app.post('/api/profiles/professor', async (req, res) => {
     body: JSON.stringify({ nome, email, ra, senha, role: 'professor', curso_id: curso_id || null, instituicao_id: instituicao_id || 1, primeiro_acesso: 1 }),
   });
   if (status >= 400) return res.status(400).json({ erro: 'RA ou email já cadastrado' });
-  res.status(201).json({ ...(Array.isArray(data) ? data[0] : data), senha_padrao: senha });
+  const prof = Array.isArray(data) ? data[0] : data;
+  // Se informou semestre, cria um registro de cota de horas para o professor
+  if (semestre_id && prof?.id) {
+    await sb('/professor_semestre_horas', {
+      method: 'POST',
+      body: JSON.stringify({ professor_id: prof.id, semestre_id: Number(semestre_id), horas_disponiveis: Number(horas_disponiveis) || 5, horas_utilizadas: 0 })
+    });
+  }
+  res.status(201).json({ ...prof, senha_padrao: senha });
 });
 
 // Professor cria Aluno
