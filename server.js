@@ -83,11 +83,16 @@ app.get('/api/profiles/:id', async (req, res) => {
 app.post('/api/profiles/admin', async (req, res) => {
   const { nome, email, senha, curso_id } = req.body;
   if (!nome || !email || !senha || !curso_id) return res.status(400).json({ erro: 'Dados incompletos' });
+  // Verifica se email já existe
+  const { data: existe } = await sb(`/profiles?email=eq.${encodeURIComponent(email)}&select=id,role`);
+  if (existe && existe.length > 0) {
+    return res.status(400).json({ erro: `Email já cadastrado como ${existe[0].role}` });
+  }
   const { data, status } = await sb('/profiles', {
     method: 'POST',
-    body: JSON.stringify({ nome, email, senha, role: 'admin', curso_id, instituicao_id: 1, primeiro_acesso: 0, is_super_admin: 0 }),
+    body: JSON.stringify({ nome, email, senha, role: 'admin', curso_id: Number(curso_id), instituicao_id: 1, primeiro_acesso: 0, is_super_admin: 0 }),
   });
-  if (status >= 400) return res.status(400).json({ erro: 'Email já cadastrado' });
+  if (status >= 400) return res.status(400).json({ erro: 'Erro ao criar admin: ' + JSON.stringify(data) });
   res.status(201).json(Array.isArray(data) ? data[0] : data);
 });
 
