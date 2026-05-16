@@ -88,6 +88,11 @@ app.post('/api/profiles/admin', async (req, res) => {
   if (existe && existe.length > 0) {
     return res.status(400).json({ erro: `Email já cadastrado como ${existe[0].role}` });
   }
+  // Limite de 2 admins por curso
+  const { data: admsCurso } = await sb(`/profiles?role=eq.admin&curso_id=eq.${curso_id}&is_super_admin=eq.0&select=id`);
+  if (admsCurso && admsCurso.length >= 2) {
+    return res.status(400).json({ erro: 'Limite de 2 coordenadores por curso atingido' });
+  }
   const { data, status } = await sb('/profiles', {
     method: 'POST',
     body: JSON.stringify({ nome, email, senha, role: 'admin', curso_id: Number(curso_id), instituicao_id: 1, primeiro_acesso: 0, is_super_admin: 0 }),
@@ -608,6 +613,80 @@ app.get('/api/superadmin/engajamento', async (req, res) => {
     .sort((a, b) => b.atividades - a.atividades).slice(0, 3);
 
   res.json({ totalAlunos, alunosAtivos, modulosMaisAcessados, professoresMaisAtivos });
+});
+
+// ── ADMIN — DETALHE POR TIPO ─────────────────────────────────────────────────
+
+app.get('/api/admin/detalhe/:tipo', async (req, res) => {
+  const { tipo } = req.params;
+  const { curso_id } = req.query;
+
+  if (tipo === 'professores') {
+    const filter = curso_id ? `?role=eq.professor&curso_id=eq.${curso_id}&select=*` : '?role=eq.professor&select=*';
+    const { data: profs } = await sb(`/profiles${filter}`);
+    const { data: turmas } = await sb('/turmas?select=*');
+    const result = (profs || []).map(p => ({
+      nome: p.nome, email: p.email, ra: p.ra,
+      turmas: (turmas || []).filter(t => t.professor_id === p.id).map(t => t.nome)
+    }));
+    return res.json(result);
+  }
+
+  if (tipo === 'turmas') {
+    const filter = curso_id ? `?role=eq.professor&curso_id=eq.${curso_id}&select=id` : '?role=eq.professor&select=id';
+    const { data: profs } = await sb(`/profiles${filter}`);
+    const profIds = (profs || []).map(p => p.id);
+    if (profIds.length === 0) return res.json([]);
+    const { data: turmas } = await sb(`/turmas?professor_id=in.(${profIds.join(',')})&select=*`);
+    const { data: profsFull } = await sb(`/profiles?role=eq.professor&select=id,nome`);
+    const { data: mats } = await sb('/matriculas?select=*');
+    const { data: alunosFull } = await sb('/profiles?role=eq.aluno&select=id,nome,ra');
+    const result = (turmas || []).map(t => ({
+      nome: t.nome,
+      professor: (profsFull || []).find(p => p.id === t.professor_id)?.nome || '—',
+      alunos: (mats || []).filter(m => m.turma_id === t.id).map(m => {
+        const a = (alunosFull || []).find(al => al.id === m.aluno_id);
+        return a ? { nome: a.nome, ra: a.ra } : null;
+      }).filter(Boolean)
+    }));
+    return res.json(result);
+  }
+
+  res.json([]);
+});
+
+// ── ADMIN — HORAS POR PROFESSOR ───────────────────────────────────────────────
+
+app.get('/api/admin/horas-professores', async (req, res) => {
+  const { curso_id } = req.query;
+  const filter = curso_id ? `?role=eq.professor&curso_id=eq.${curso_id}&select=*` : '?role=eq.professor&select=*';
+  const { data: profs } = await sb(`/profiles${filter}`);
+  if (!profs || profs.length === 0) return res.json([]);
+
+  const profIds = profs.map(p => p.id);
+  const { data: turmas } = await sb(`/turmas?professor_id=in.(${profIds.join(',')})&select=*`);
+  const turmaIds = (turmas || []).map(t => t.id);
+
+  let certs = [];
+  if (turmaIds.length > 0) {
+    const { data: mats } = await sb(`/matriculas?turma_id=in.(${turmaIds.join(',')})&select=aluno_id,turma_id`);
+    const alunoIds = [...new Set((mats || []).map(m => m.aluno_id))];
+    if (alunoIds.length > 0) {
+      const { data: certsData } = await sb(`/certificados?aluno_id=in.(${alunoIds.join(',')})&select=*`);
+      certs = certsData || [];
+    }
+  }
+
+  const result = profs.map(prof => {
+    const turmasProf = (turmas || []).filter(t => t.professor_id === prof.id);
+    const turmaIdsProf = turmasProf.map(t => t.id);
+    const horas = certs
+      .filter(c => turmaIdsProf.includes(c.turma_id))
+      .reduce((s, c) => s + (parseFloat(c.horas) || 0), 0);
+    return { nome: prof.nome, turmas: turmasProf.length, horas: horas.toFixed(1) };
+  }).sort((a, b) => parseFloat(b.horas) - parseFloat(a.horas));
+
+  res.json(result);
 });
 
 // ── RELATÓRIO POR CURSO (Admin) ──────────────────────────────────────────────
