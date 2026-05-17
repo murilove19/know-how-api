@@ -534,7 +534,7 @@ app.get('/api/stats-superadmin', async (req, res) => {
     admins: admins.data?.length || 0,
     turmas: turmas.data?.length || 0,
     atividades: atividades.data?.length || 0,
-    horas: horas.toFixed(1),
+    horas: horas.toFixed(1), // horas já conquistadas pelos alunos (certificados)
   });
 });
 
@@ -623,21 +623,29 @@ app.get('/api/superadmin/detalhe/:tipo', async (req, res) => {
 // ── SUPER ADMIN — LOGS ────────────────────────────────────────────────────────
 
 app.get('/api/superadmin/logs', async (req, res) => {
-  const [profs, alunos, tentativas, certs] = await Promise.all([
-    sb('/profiles?role=eq.professor&select=nome,created_at&order=created_at.desc&limit=5'),
-    sb('/profiles?role=eq.aluno&select=nome,created_at&order=created_at.desc&limit=5'),
-    sb('/tentativas?select=aluno_id,nota,created_at&order=created_at.desc&limit=5'),
-    sb('/certificados?select=aluno_id,horas,emitido_em&order=emitido_em.desc&limit=5'),
+  const [profs, alunos, tentativas, certs, atividades, modulos] = await Promise.all([
+    sb('/profiles?role=eq.professor&select=id,nome,created_at&order=created_at.desc&limit=10'),
+    sb('/profiles?role=eq.aluno&select=id,nome,created_at&order=created_at.desc&limit=10'),
+    sb('/tentativas?select=aluno_id,atividade_id,nota,created_at&order=created_at.desc&limit=10'),
+    sb('/certificados?select=aluno_id,horas,emitido_em&order=emitido_em.desc&limit=10'),
+    sb('/atividades?select=id,titulo,professor_id,created_at&order=created_at.desc&limit=10'),
+    sb('/modulos?select=id,titulo,professor_id,created_at&order=created_at.desc&limit=10'),
   ]);
   const { data: alunosMap } = await sb('/profiles?role=eq.aluno&select=id,nome');
+  const { data: profsMap } = await sb('/profiles?role=eq.professor&select=id,nome');
+  const { data: ativsMap } = await sb('/atividades?select=id,titulo');
   const getAluno = (id) => (alunosMap || []).find(a => a.id === id)?.nome || 'Aluno';
+  const getProf = (id) => (profsMap || []).find(p => p.id === id)?.nome || 'Professor';
+  const getAtiv = (id) => (ativsMap || []).find(a => a.id === id)?.titulo || 'Atividade';
 
   const logs = [
     ...(profs.data || []).map(p => ({ icone: "👨‍🏫", descricao: `Professor ${p.nome} foi cadastrado`, data: p.created_at })),
     ...(alunos.data || []).map(a => ({ icone: "👤", descricao: `Aluno ${a.nome} foi cadastrado`, data: a.created_at })),
-    ...(tentativas.data || []).map(t => ({ icone: "📝", descricao: `${getAluno(t.aluno_id)} realizou uma atividade com nota ${t.nota}`, data: t.created_at })),
+    ...(tentativas.data || []).map(t => ({ icone: "📝", descricao: `${getAluno(t.aluno_id)} fez "${getAtiv(t.atividade_id)}" — nota ${t.nota}`, data: t.created_at })),
     ...(certs.data || []).map(c => ({ icone: "🎓", descricao: `${getAluno(c.aluno_id)} recebeu certificado de ${c.horas}h`, data: c.emitido_em })),
-  ].sort((a, b) => new Date(b.data) - new Date(a.data)).slice(0, 20);
+    ...(atividades.data || []).map(a => ({ icone: "📋", descricao: `Prof. ${getProf(a.professor_id)} criou atividade "${a.titulo}"`, data: a.created_at })),
+    ...(modulos.data || []).map(m => ({ icone: "📚", descricao: `Prof. ${getProf(m.professor_id)} criou módulo "${m.titulo}"`, data: m.created_at })),
+  ].sort((a, b) => new Date(b.data) - new Date(a.data)).slice(0, 30);
 
   res.json(logs);
 });
@@ -837,6 +845,34 @@ app.get('/api/relatorios/curso', async (req, res) => {
 
 // ── N8N — GERAR QUESTÕES COM IA ───────────────────────────────────────────────
 
+
+// ── PROFESSOR STATS ───────────────────────────────────────────────────────────
+app.get('/api/professor/stats', async (req, res) => {
+  const { professor_id } = req.query;
+  if (!professor_id) return res.status(400).json({ erro: 'professor_id obrigatório' });
+  try {
+    const [turmasR, modulosR, atividadesR] = await Promise.all([
+      sb(`/turmas?professor_id=eq.${professor_id}&select=id,nome`),
+      sb(`/modulos?professor_id=eq.${professor_id}&select=id,titulo,cor,turma_id`),
+      sb(`/atividades?professor_id=eq.${professor_id}&select=id,titulo,modulo_id,data_fim`),
+    ]);
+    const turmas = turmasR.data || [];
+    const modulos = modulosR.data || [];
+    const atividades = atividadesR.data || [];
+    const listaModulos = modulos.map(m => ({
+      ...m,
+      turma: turmas.find(t => t.id === m.turma_id)?.nome || '—'
+    }));
+    const listaAtividades = atividades.map(a => {
+      const mod = modulos.find(m => m.id === a.modulo_id);
+      return { ...a, modulo: mod?.titulo || '—' };
+    });
+    res.json({ modulos: modulos.length, atividades: atividades.length, listaModulos, listaAtividades });
+  } catch (error) {
+    res.status(500).json({ erro: error.message });
+  }
+});
+
 app.post('/api/gerar-questoes', async (req, res) => {
   const { texto, numQuestoes, tema, modulo_id, atividade_id, professor_id } = req.body;
   
@@ -874,6 +910,29 @@ app.post('/api/gerar-questoes', async (req, res) => {
     res.status(500).json({ erro: 'Erro ao conectar com o gerador de IA: ' + error.message });
   }
 });
+
+// ── DELETE PROFILE (super admin) ─────────────────────────────────────────────
+app.delete('/api/profiles/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await sb(`/profiles?id=eq.${id}`, { method: 'DELETE' });
+    res.json({ sucesso: true });
+  } catch (error) {
+    res.status(500).json({ erro: error.message });
+  }
+});
+
+// ── DELETE TURMA (super admin) ────────────────────────────────────────────────
+app.delete('/api/turmas/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await sb(`/turmas?id=eq.${id}`, { method: 'DELETE' });
+    res.json({ sucesso: true });
+  } catch (error) {
+    res.status(500).json({ erro: error.message });
+  }
+});
+
 // ── START ─────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, '0.0.0.0', () => {
