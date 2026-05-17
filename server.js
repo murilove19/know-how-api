@@ -170,6 +170,11 @@ app.post('/api/cursos', async (req, res) => {
 
 // ── TURMAS ────────────────────────────────────────────────────────────────────
 
+app.get('/api/turmas/:id', async (req, res) => {
+  const { data } = await sb(`/turmas?id=eq.${req.params.id}&select=*`);
+  res.json(data && data[0] ? data[0] : null);
+});
+
 app.get('/api/turmas', async (req, res) => {
   const { professor_id, curso_id } = req.query;
   let filter = '?select=*';
