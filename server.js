@@ -4,8 +4,8 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-const SUPABASE_URL = 'https://qwggvbiirxcjucuurwfw.supabase.co/rest/v1';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3Z2d2YmlpcnhjanVjdXVyd2Z3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjczNDksImV4cCI6MjA5NDIwMzM0OX0.0N4xpnPcBFSrDN4kzb8uag_Sdvr8D-WcGxpnauQtHMo';
+const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://qwggvbiirxcjucuurwfw.supabase.co').replace(/\/rest\/v1\/?$/, '') + '/rest/v1';
+const SUPABASE_KEY = process.env.SUPABASE_KEY || '';
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -876,7 +876,7 @@ app.post('/api/gerar-questoes', async (req, res) => {
 });
 // ── START ─────────────────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Know-How API rodando em http://localhost:${PORT}`);
   console.log(`☁️  Banco: Supabase (PostgreSQL na nuvem)`);
 });
