@@ -44,6 +44,17 @@ app.post('/api/login', async (req, res) => {
   res.json({ usuario: data[0] });
 });
 
+app.put('/api/perfil/foto', async (req, res) => {
+  const { id, foto_url } = req.body;
+  if (!id || !foto_url) return res.status(400).json({ erro: 'Dados incompletos' });
+  const { status } = await sb(`/profiles?id=eq.${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ foto_url }),
+  });
+  if (status >= 400) return res.status(400).json({ erro: 'Erro ao salvar foto' });
+  res.json({ ok: true });
+});
+
 app.put('/api/trocar-senha', async (req, res) => {
   const { id, senhaAtual, novaSenha } = req.body;
   if (!id || !novaSenha) return res.status(400).json({ erro: 'Dados incompletos' });
