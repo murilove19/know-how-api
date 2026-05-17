@@ -168,6 +168,24 @@ app.post('/api/profiles/aluno', async (req, res) => {
 
 // ── CURSOS ────────────────────────────────────────────────────────────────────
 
+// ── INSTITUIÇÃO ────────────────────────────────────────────────────────────
+
+app.get('/api/instituicao', async (req, res) => {
+  const { data } = await sb('/instituicoes?id=eq.1&select=*');
+  res.json(data && data[0] ? data[0] : null);
+});
+
+app.put('/api/instituicao/logo', async (req, res) => {
+  const { logo_url } = req.body;
+  if (!logo_url) return res.status(400).json({ erro: 'logo_url obrigatório' });
+  const { status } = await sb('/instituicoes?id=eq.1', {
+    method: 'PATCH',
+    body: JSON.stringify({ logo_url }),
+  });
+  if (status >= 400) return res.status(400).json({ erro: 'Erro ao salvar logo' });
+  res.json({ ok: true });
+});
+
 app.get('/api/cursos', async (req, res) => {
   const { data } = await sb('/cursos?select=*&order=nome.asc');
   res.json(data || []);
