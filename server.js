@@ -899,7 +899,7 @@ app.post('/api/gerar-questoes', async (req, res) => {
           enunciado: q.enunciado,
           alternativas: JSON.stringify(q.alternativas),
           resposta_correta: q.resposta_correta,
-          status: 'aprovada'
+          status: 'pendente'
         }),
       });
       questoesSalvas.push(Array.isArray(questao) ? questao[0] : questao);
