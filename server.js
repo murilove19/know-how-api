@@ -384,13 +384,28 @@ app.post('/api/tentativas', async (req, res) => {
   let certificado = null;
   if (ativData && ativData[0]) {
     const ativ = ativData[0];
-    const notaMinima = ativ.gera_horas ? ativ.nota_minima_horas : 6;
-    if (nota >= notaMinima) {
+    // Usa nota_minima_horas se gera_horas, senão nota_minima, senão 6
+    const notaMinima = ativ.gera_horas === 1 ? (ativ.nota_minima_horas || 6) : (ativ.nota_minima || 6);
+    if (ativ.gera_horas === 1 && nota >= notaMinima) {
       const { data: modData } = await sb(`/modulos?id=eq.${ativ.modulo_id}&select=*`);
-      if (modData && modData[0]) {
-        await sb('/certificados', { method: 'POST', body: JSON.stringify({ aluno_id, modulo_id: modData[0].id }), headers: { 'Prefer': 'return=representation,resolution=ignore-duplicates' } });
-        const { data: certData } = await sb(`/certificados?aluno_id=eq.${aluno_id}&modulo_id=eq.${modData[0].id}&select=*`);
-        certificado = certData && certData[0] ? { ...certData[0], horas: ativ.horas, modulo_titulo: modData[0].titulo } : null;
+      const modulo = modData && modData[0] ? modData[0] : null;
+      // Verifica se já existe certificado para esta atividade
+      const { data: certExist } = await sb(`/certificados?aluno_id=eq.${aluno_id}&atividade_id=eq.${atividade_id}&select=id`);
+      if (!certExist || certExist.length === 0) {
+        const certPayload = {
+          aluno_id,
+          atividade_id,
+          modulo_id: modulo?.id || null,
+          horas: ativ.horas,
+          titulo_atividade: ativ.titulo,
+          modulo_titulo: modulo?.titulo || null,
+          nota_obtida: nota,
+        };
+        const { data: certData } = await sb('/certificados', { method: 'POST', body: JSON.stringify(certPayload) });
+        certificado = Array.isArray(certData) ? certData[0] : certData;
+        if (certificado) certificado = { ...certificado, horas: ativ.horas, modulo_titulo: modulo?.titulo || ativ.titulo, titulo_atividade: ativ.titulo };
+      } else {
+        certificado = { ...certExist[0], horas: ativ.horas, modulo_titulo: modulo?.titulo || ativ.titulo, titulo_atividade: ativ.titulo };
       }
     }
   }
@@ -403,9 +418,24 @@ app.post('/api/tentativas', async (req, res) => {
 app.get('/api/certificados', async (req, res) => {
   const { aluno_id } = req.query;
   if (!aluno_id) return res.status(400).json({ erro: 'aluno_id obrigatório' });
-  const { data } = await sb(`/certificados?aluno_id=eq.${aluno_id}&select=*,modulos!modulo_id(titulo,horas_maximas)`);
-  const mapped = (data || []).map(c => ({ ...c, modulo_titulo: c.modulos?.titulo, horas: c.modulos?.horas_maximas }));
-  res.json(mapped);
+  const { data } = await sb(`/certificados?aluno_id=eq.${aluno_id}&order=created_at.desc&select=*`);
+  const certs = data || [];
+  // Enrich with atividade and modulo titles if not stored
+  const enriched = await Promise.all(certs.map(async c => {
+    let titulo = c.titulo_atividade;
+    let modTitulo = c.modulo_titulo;
+    let horas = c.horas;
+    if (!titulo && c.atividade_id) {
+      const { data: a } = await sb(`/atividades?id=eq.${c.atividade_id}&select=titulo,horas,modulo_id`);
+      if (a && a[0]) { titulo = a[0].titulo; horas = horas || a[0].horas; }
+    }
+    if (!modTitulo && c.modulo_id) {
+      const { data: m } = await sb(`/modulos?id=eq.${c.modulo_id}&select=titulo`);
+      if (m && m[0]) modTitulo = m[0].titulo;
+    }
+    return { ...c, titulo_atividade: titulo || modTitulo || 'Atividade', modulo_titulo: modTitulo, horas: horas || 0 };
+  }));
+  res.json(enriched);
 });
 
 // ── SEMESTRES ─────────────────────────────────────────────────────────────────
@@ -513,7 +543,29 @@ app.get('/api/relatorios/turma/:turma_id', async (req, res) => {
     return { ...ativ, totalRespostas: tentsAtiv.length, media, aprovados, taxa };
   });
 
-  res.json({ alunos: statsPorAluno, atividades: statsPorAtividade, tentativas });
+  // Certificados da turma
+  let certsTurma = [];
+  if (alunoIds.length > 0) {
+    const { data: certsData } = await sb(`/certificados?aluno_id=in.(${alunoIds.join(',')})&select=*`);
+    certsTurma = certsData || [];
+  }
+
+  // Adiciona certificados aos stats por aluno
+  const statsPorAlunoComCerts = statsPorAluno.map(a => ({
+    ...a,
+    certificados: certsTurma.filter(c => c.aluno_id === a.id)
+  }));
+
+  // Adiciona quem ganhou certificado em cada atividade
+  const statsPorAtividadeComCerts = statsPorAtividade.map(a => ({
+    ...a,
+    certificados: certsTurma.filter(c => c.atividade_id === a.id).map(c => {
+      const aluno = alunos.find(al => al.id === c.aluno_id);
+      return { aluno_nome: aluno?.nome || 'Aluno', nota: c.nota_obtida, horas: c.horas };
+    })
+  }));
+
+  res.json({ alunos: statsPorAlunoComCerts, atividades: statsPorAtividadeComCerts, tentativas, certificados: certsTurma });
 });
 
 // ── SUPER ADMIN — STATS COMPLETO ─────────────────────────────────────────────
