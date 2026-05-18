@@ -933,6 +933,29 @@ app.delete('/api/turmas/:id', async (req, res) => {
   }
 });
 
+
+// ── DELETE CURSO (super admin) ────────────────────────────────────────────────
+app.delete('/api/cursos/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await sb(`/cursos?id=eq.${id}`, { method: 'DELETE' });
+    res.json({ sucesso: true });
+  } catch (error) {
+    res.status(500).json({ erro: error.message });
+  }
+});
+
+// ── DELETE SEMESTRE (super admin) ─────────────────────────────────────────────
+app.delete('/api/semestres/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await sb(`/semestres?id=eq.${id}`, { method: 'DELETE' });
+    res.json({ sucesso: true });
+  } catch (error) {
+    res.status(500).json({ erro: error.message });
+  }
+});
+
 // ── START ─────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, '0.0.0.0', () => {
