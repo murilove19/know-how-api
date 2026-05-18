@@ -364,6 +364,18 @@ app.post('/api/questoes', async (req, res) => {
   res.status(201).json(Array.isArray(data) ? data[0] : data);
 });
 
+app.put('/api/questoes/:id', async (req, res) => {
+  const { id } = req.params;
+  const { enunciado, alternativas, resposta_correta, status } = req.body;
+  const payload = {};
+  if (enunciado !== undefined) payload.enunciado = enunciado;
+  if (alternativas !== undefined) payload.alternativas = JSON.stringify(alternativas);
+  if (resposta_correta !== undefined) payload.resposta_correta = resposta_correta;
+  if (status !== undefined) payload.status = status;
+  const { data } = await sb(`/questoes?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  res.json(data?.[0] || { sucesso: true });
+});
+
 // ── TENTATIVAS ────────────────────────────────────────────────────────────────
 
 app.get('/api/tentativas', async (req, res) => {
