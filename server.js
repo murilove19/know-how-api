@@ -279,11 +279,6 @@ app.get('/api/modulos', async (req, res) => {
   res.json(data || []);
 });
 
-app.get('/api/modulos/:id', async (req, res) => {
-  const { data } = await sb(`/modulos?id=eq.${req.params.id}&select=*`);
-  res.json(data?.[0] || null);
-});
-
 app.post('/api/modulos', async (req, res) => {
   const { titulo, descricao, professor_id, turma_id, nota_minima, gera_horas, horas_maximas, data_inicio, data_fim, cor } = req.body;
   if (!titulo || !professor_id || !turma_id) return res.status(400).json({ erro: 'Dados incompletos' });
@@ -367,18 +362,6 @@ app.post('/api/questoes', async (req, res) => {
   if (!atividade_id || !enunciado || !alternativas) return res.status(400).json({ erro: 'Dados incompletos' });
   const { data } = await sb('/questoes', { method: 'POST', body: JSON.stringify({ atividade_id, enunciado, alternativas: JSON.stringify(alternativas), resposta_correta }) });
   res.status(201).json(Array.isArray(data) ? data[0] : data);
-});
-
-app.put('/api/questoes/:id', async (req, res) => {
-  const { id } = req.params;
-  const { enunciado, alternativas, resposta_correta, status } = req.body;
-  const payload = {};
-  if (enunciado !== undefined) payload.enunciado = enunciado;
-  if (alternativas !== undefined) payload.alternativas = JSON.stringify(alternativas);
-  if (resposta_correta !== undefined) payload.resposta_correta = resposta_correta;
-  if (status !== undefined) payload.status = status;
-  await sb(`/questoes?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
-  res.json({ sucesso: true });
 });
 
 // ── TENTATIVAS ────────────────────────────────────────────────────────────────
@@ -916,12 +899,10 @@ app.post('/api/gerar-questoes', async (req, res) => {
           enunciado: q.enunciado,
           alternativas: JSON.stringify(q.alternativas),
           resposta_correta: q.resposta_correta,
-          status: 'pendente'
+          status: 'aprovada'
         }),
-        headers: { 'Prefer': 'return=representation' },
       });
-      const questaoSalva = Array.isArray(questao) ? questao[0] : questao;
-      if (questaoSalva) questoesSalvas.push({ ...q, id: questaoSalva.id });
+      questoesSalvas.push(Array.isArray(questao) ? questao[0] : questao);
     }
 
     res.json({ sucesso: true, questoes: questoesSalvas, total: questoesSalvas.length });
