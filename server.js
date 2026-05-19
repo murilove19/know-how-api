@@ -400,12 +400,28 @@ app.post('/api/tentativas', async (req, res) => {
 
 // ── CERTIFICADOS ──────────────────────────────────────────────────────────────
 
+
+
 app.get('/api/certificados', async (req, res) => {
   const { aluno_id } = req.query;
   if (!aluno_id) return res.status(400).json({ erro: 'aluno_id obrigatório' });
-  const { data } = await sb(`/certificados?aluno_id=eq.${aluno_id}&select=*,modulos!modulo_id(titulo,horas_maximas)`);
-  const mapped = (data || []).map(c => ({ ...c, modulo_titulo: c.modulos?.titulo, horas: c.modulos?.horas_maximas }));
-  res.json(mapped);
+  const { data } = await sb(`/certificados?aluno_id=eq.${aluno_id}&order=created_at.desc&select=*`);
+  const certs = data || [];
+  const enriched = await Promise.all(certs.map(async c => {
+    let titulo = c.titulo_atividade;
+    let modTitulo = c.modulo_titulo;
+    let horas = c.horas;
+    if (!titulo && c.atividade_id) {
+      const { data: a } = await sb(`/atividades?id=eq.${c.atividade_id}&select=titulo,horas,modulo_id`);
+      if (a && a[0]) { titulo = a[0].titulo; horas = horas || a[0].horas; }
+    }
+    if (!modTitulo && c.modulo_id) {
+      const { data: m } = await sb(`/modulos?id=eq.${c.modulo_id}&select=titulo`);
+      if (m && m[0]) modTitulo = m[0].titulo;
+    }
+    return { ...c, titulo_atividade: titulo || modTitulo || 'Atividade', modulo_titulo: modTitulo, horas: parseFloat(horas) || 0 };
+  }));
+  res.json(enriched);
 });
 
 // ── SEMESTRES ─────────────────────────────────────────────────────────────────
