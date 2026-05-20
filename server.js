@@ -931,6 +931,11 @@ app.post('/api/gerar-questoes', async (req, res) => {
 app.delete('/api/profiles/:id', async (req, res) => {
   const { id } = req.params;
   try {
+    // Deleta em cascata respeitando foreign keys
+    await sb(`/certificados?aluno_id=eq.${id}`, { method: 'DELETE' });
+    await sb(`/tentativas?aluno_id=eq.${id}`, { method: 'DELETE' });
+    await sb(`/matriculas?aluno_id=eq.${id}`, { method: 'DELETE' });
+    await sb(`/professor_semestre_horas?professor_id=eq.${id}`, { method: 'DELETE' });
     await sb(`/profiles?id=eq.${id}`, { method: 'DELETE' });
     res.json({ sucesso: true });
   } catch (error) {
