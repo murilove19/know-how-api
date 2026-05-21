@@ -364,6 +364,18 @@ app.post('/api/questoes', async (req, res) => {
   res.status(201).json(Array.isArray(data) ? data[0] : data);
 });
 
+app.put('/api/questoes/:id', async (req, res) => {
+  const { id } = req.params;
+  const { enunciado, alternativas, resposta_correta, status } = req.body;
+  const payload = {};
+  if (enunciado !== undefined) payload.enunciado = enunciado;
+  if (alternativas !== undefined) payload.alternativas = JSON.stringify(alternativas);
+  if (resposta_correta !== undefined) payload.resposta_correta = resposta_correta;
+  if (status !== undefined) payload.status = status;
+  await sb(`/questoes?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  res.json({ sucesso: true });
+});
+
 // ── TENTATIVAS ────────────────────────────────────────────────────────────────
 
 app.get('/api/tentativas', async (req, res) => {
@@ -931,11 +943,6 @@ app.post('/api/gerar-questoes', async (req, res) => {
 app.delete('/api/profiles/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    // Deleta em cascata respeitando foreign keys
-    await sb(`/certificados?aluno_id=eq.${id}`, { method: 'DELETE' });
-    await sb(`/tentativas?aluno_id=eq.${id}`, { method: 'DELETE' });
-    await sb(`/matriculas?aluno_id=eq.${id}`, { method: 'DELETE' });
-    await sb(`/professor_semestre_horas?professor_id=eq.${id}`, { method: 'DELETE' });
     await sb(`/profiles?id=eq.${id}`, { method: 'DELETE' });
     res.json({ sucesso: true });
   } catch (error) {
