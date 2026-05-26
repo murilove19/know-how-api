@@ -396,34 +396,13 @@ app.post('/api/tentativas', async (req, res) => {
   let certificado = null;
   if (ativData && ativData[0]) {
     const ativ = ativData[0];
-    const notaMinima = ativ.gera_horas === 1 ? (ativ.nota_minima_horas || 6) : (ativ.nota_minima || 6);
-    if (ativ.gera_horas === 1 && nota >= notaMinima) {
+    const notaMinima = ativ.gera_horas ? ativ.nota_minima_horas : 6;
+    if (nota >= notaMinima) {
       const { data: modData } = await sb(`/modulos?id=eq.${ativ.modulo_id}&select=*`);
-      const modulo = modData && modData[0] ? modData[0] : null;
-      // Verifica se já existe certificado para esta atividade
-      const { data: certExist } = await sb(`/certificados?aluno_id=eq.${aluno_id}&atividade_id=eq.${atividade_id}&select=id`);
-      if (!certExist || certExist.length === 0) {
-        const certPayload = {
-          aluno_id,
-          atividade_id,
-          modulo_id: modulo?.id || null,
-          horas: ativ.horas || 0,
-          titulo_atividade: ativ.titulo,
-          modulo_titulo: modulo?.titulo || null,
-          nota_obtida: nota,
-        };
-        const { data: certData } = await sb('/certificados', {
-          method: 'POST',
-          body: JSON.stringify(certPayload),
-          headers: { 'Prefer': 'return=representation' }
-        });
-        certificado = Array.isArray(certData) ? certData[0] : certData;
-        if (certificado) certificado = {
-          ...certificado,
-          horas: ativ.horas || 0,
-          titulo_atividade: ativ.titulo,
-          modulo_titulo: modulo?.titulo || null,
-        };
+      if (modData && modData[0]) {
+        await sb('/certificados', { method: 'POST', body: JSON.stringify({ aluno_id, modulo_id: modData[0].id }), headers: { 'Prefer': 'return=representation,resolution=ignore-duplicates' } });
+        const { data: certData } = await sb(`/certificados?aluno_id=eq.${aluno_id}&modulo_id=eq.${modData[0].id}&select=*`);
+        certificado = certData && certData[0] ? { ...certData[0], horas: ativ.horas, modulo_titulo: modData[0].titulo } : null;
       }
     }
   }
@@ -928,7 +907,7 @@ app.post('/api/gerar-questoes', async (req, res) => {
   if (!texto || !modulo_id) return res.status(400).json({ erro: 'Dados incompletos' });
 
   try {
-    const response = await fetch('https://muriloterra19.app.n8n.cloud/webhook/gerar-questoes', {
+    const response = await fetch('https://murilove69.app.n8n.cloud/webhook/gerar-questoes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ texto, numQuestoes: numQuestoes || 5, tema, modulo_id, atividade_id, professor_id })
